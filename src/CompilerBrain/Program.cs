@@ -1,4 +1,5 @@
-﻿using Anthropic;
+﻿using System.ClientModel;
+using System.ClientModel.Primitives;
 using CompilerBrain;
 using ConsoleAppFramework;
 using Microsoft.Agents.AI;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using OpenAI;
 using ZLogger;
 
 var app = ConsoleApp.Create();
@@ -23,14 +25,24 @@ app.ConfigureServices((configuration, services) =>
     services.AddTransient<SolutionLoadProgress>();
     services.AddSingleton<CompilerBrainAIFunctions>();
 
-    // make chat-client
-    var key = configuration.GetSection("ANTHROPIC_API_KEY").Value ?? null;
-    var model = "claude-haiku-4-5-20251001";
+    // make chat-client via GitHub Copilot (Claude Sonnet)
+    var model = "claude-sonnet-4.5";
 
     services.AddSingleton<IChatClient>(serviceProvider =>
     {
-        var builder = new AnthropicClient(new Anthropic.Core.ClientOptions { APIKey = key })
-            .AsIChatClient(model)
+        // Authenticate via GitHub OAuth device flow + Copilot token exchange
+        var (copilotToken, apiBaseUrl) = GitHubCopilotAuth.GetCopilotToken();
+
+        var credential = new ApiKeyCredential(copilotToken);
+        var clientOptions = new OpenAIClientOptions
+        {
+            Endpoint = new Uri(apiBaseUrl)
+        };
+        // Add required Copilot IDE headers to every request
+        clientOptions.AddPolicy(new CopilotHeadersPolicy(), PipelinePosition.PerCall);
+        var builder = new OpenAIClient(credential, clientOptions)
+            .GetChatClient(model)
+            .AsIChatClient()
             .AsBuilder();
         builder.UseFunctionInvocation(serviceProvider.GetRequiredService<ILoggerFactory>());
         return builder.Build(serviceProvider);
